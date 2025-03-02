@@ -18,6 +18,9 @@ func main() {
 		log.Println("Файл .env не найден, используются переменные окружения")
 	}
 
+	// Логируем DATABASE_URL перед подключением
+	log.Printf("DATABASE_URL: %s", os.Getenv("DATABASE_URL"))
+
 	// Подключаемся к базе данных
 	database, err := db.Connect()
 	if err != nil {
@@ -53,6 +56,13 @@ func main() {
 	if port == "" {
 		port = "8080" // Значение по умолчанию
 	}
+
+	// Получаем WebSocket URL и логируем его
+	wsURL := os.Getenv("WS_URL")
+	if wsURL == "" {
+		wsURL = "wss://localhost:" + port + "/ws" // Значение по умолчанию для локальной разработки
+	}
+	log.Printf("WebSocket URL: %s", wsURL)
 
 	// Запускаем сервер
 	log.Printf("Сервер запущен на порту %s", port)
