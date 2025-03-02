@@ -3,14 +3,21 @@ package main
 import (
 	"log"
 	"net/http"
+	"os" // Добавляем для работы с переменными окружения
 
 	"go-robot/internal/chat"
 	"go-robot/internal/db"
 	"go-robot/internal/handlers"
 	"go-robot/internal/seed"
+	"github.com/joho/godotenv" // Добавляем для локальной разработки с .env
 )
 
 func main() {
+	// Загружаем .env для локальной разработки (опционально)
+	if err := godotenv.Load(); err != nil {
+		log.Println("Файл .env не найден, используются переменные окружения")
+	}
+
 	// Подключаемся к базе данных
 	database, err := db.Connect()
 	if err != nil {
@@ -41,8 +48,13 @@ func main() {
 	// Включаем CORS для всех маршрутов (если требуется)
 	handler := handlers.EnableCORS(http.DefaultServeMux)
 
+	// Получаем порт из переменной окружения
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080" // Значение по умолчанию
+	}
+
 	// Запускаем сервер
-	port := "8080"
 	log.Printf("Сервер запущен на порту %s", port)
 	if err := http.ListenAndServe(":"+port, handler); err != nil {
 		log.Fatalf("Ошибка запуска сервера: %v", err)

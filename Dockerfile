@@ -23,4 +23,3 @@ EXPOSE 8080
 
 CMD ["./go-robot"]
 
-
