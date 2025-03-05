@@ -1,5 +1,5 @@
 # Этап сборки: используем официальный образ Golang
-FROM golang:1.20 AS builder
+FROM golang:1.23 AS builder
 
 WORKDIR /app
 
