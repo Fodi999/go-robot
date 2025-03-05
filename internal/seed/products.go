@@ -63,4 +63,3 @@ func InsertSampleProducts(db *sql.DB) {
 
 
 
-

@@ -155,110 +155,115 @@ var upgrader = websocket.Upgrader{
 
 // ChatHandler обрабатывает подключение WebSocket и обмен сообщениями.
 func (hub *ChatHub) ChatHandler(w http.ResponseWriter, r *http.Request) {
-	// Извлекаем client_id, chat_id и дополнительный параметр username.
-	clientID := r.URL.Query().Get("client_id")
-	chatID := r.URL.Query().Get("chat_id")
-	username := r.URL.Query().Get("username")
-	if clientID == "" || chatID == "" {
-		http.Error(w, "client_id и chat_id обязательны", http.StatusBadRequest)
-		return
-	}
-	// Если username не передан, используем clientID.
-	if username == "" {
-		username = clientID
-	}
+    // Извлекаем client_id и username
+    clientID := r.URL.Query().Get("client_id")
+    username := r.URL.Query().Get("username")
+    if clientID == "" {
+        http.Error(w, "client_id обязателен", http.StatusBadRequest)
+        return
+    }
+    // Если username не передан, используем clientID
+    if username == "" {
+        username = clientID
+    }
+    // chat_id теперь необязателен при подключении
+    chatID := r.URL.Query().Get("chat_id")
+    if chatID == "" {
+        chatID = "global" // Используем временный chatID, если не указан
+    }
 
-	ws, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Printf("Ошибка апгрейда до WS: %v", err)
-		return
-	}
+    ws, err := upgrader.Upgrade(w, r, nil)
+    if err != nil {
+        log.Printf("Ошибка апгрейда до WS: %v", err)
+        return
+    }
 
-	hub.mu.Lock()
-	if _, exists := hub.chats[chatID]; !exists {
-		hub.chats[chatID] = make(map[*websocket.Conn]string)
-		hub.messages[chatID] = []Message{} // Инициализируем историю сообщений.
-	}
-	// Сохраняем имя пользователя вместо clientID.
-	hub.chats[chatID][ws] = username
-	hub.mu.Unlock()
+    hub.mu.Lock()
+    if _, exists := hub.chats[chatID]; !exists {
+        hub.chats[chatID] = make(map[*websocket.Conn]string)
+        hub.messages[chatID] = []Message{}
+    }
+    hub.chats[chatID][ws] = username
+    hub.mu.Unlock()
 
-	log.Printf("Клиент %s (%s) подключился к чату %s", clientID, username, chatID)
-	hub.sendChatState(ws, chatID) // Отправляем текущее состояние чата.
-	hub.broadcastStatus(chatID)   // Уведомляем всех о новом пользователе.
+    log.Printf("Клиент %s (%s) подключился к чату %s", clientID, username, chatID)
+    hub.sendChatState(ws, chatID)
+    hub.broadcastStatus(chatID)
 
-	// Запускаем горутину для отправки пинга клиенту.
-	go hub.pingLoop(ws, clientID, chatID)
+    go hub.pingLoop(ws, clientID, chatID)
 
-	// Основной цикл чтения сообщений.
-	for {
-		_, data, err := ws.ReadMessage()
-		if err != nil {
-			log.Printf("Клиент %s отключился из чата %s: %v", clientID, chatID, err)
-			hub.mu.Lock()
-			delete(hub.chats[chatID], ws)
-			if len(hub.chats[chatID]) == 0 {
-				delete(hub.chats, chatID)
-				delete(hub.messages, chatID)
-			}
-			hub.broadcastStatus(chatID) // Обновляем статус при отключении.
-			hub.mu.Unlock()
-			break
-		}
+    for {
+        _, data, err := ws.ReadMessage()
+        if err != nil {
+            log.Printf("Клиент %s отключился из чата %s: %v", clientID, chatID, err)
+            hub.mu.Lock()
+            delete(hub.chats[chatID], ws)
+            if len(hub.chats[chatID]) == 0 {
+                delete(hub.chats, chatID)
+                delete(hub.messages, chatID)
+            }
+            hub.broadcastStatus(chatID)
+            hub.mu.Unlock()
+            break
+        }
 
-		// Проверяем, является ли сообщение обновлением статуса прочтения.
-		var potentialUpdate struct {
-			Update string `json:"update"`
-		}
-		if err := json.Unmarshal(data, &potentialUpdate); err == nil && potentialUpdate.Update == "read" {
-			var update ReadStatusUpdate
-			if err := json.Unmarshal(data, &update); err != nil {
-				log.Printf("Ошибка разбора обновления статуса: %v", err)
-				continue
-			}
-			hub.mu.Lock()
-			msgs := hub.messages[chatID]
-			for i, m := range msgs {
-				if m.Timestamp == update.Timestamp {
-					hub.messages[chatID][i].Read = update.Read
-					updatedMsg, err := json.Marshal(hub.messages[chatID][i])
-					if err != nil {
-						log.Printf("Ошибка маршаллинга обновленного сообщения: %v", err)
-						continue
-					}
-					for client := range hub.chats[chatID] {
-						if err := client.WriteMessage(websocket.TextMessage, updatedMsg); err != nil {
-							log.Printf("Ошибка отправки обновленного статуса: %v", err)
-							client.Close()
-							delete(hub.chats[chatID], client)
-						}
-					}
-				}
-			}
-			hub.mu.Unlock()
-			continue // Пропускаем дальнейшую обработку этого пакета.
-		}
+        // Обработка обновления статуса прочтения
+        var potentialUpdate struct {
+            Update string `json:"update"`
+        }
+        if err := json.Unmarshal(data, &potentialUpdate); err == nil && potentialUpdate.Update == "read" {
+            var update ReadStatusUpdate
+            if err := json.Unmarshal(data, &update); err != nil {
+                log.Printf("Ошибка разбора обновления статуса: %v", err)
+                continue
+            }
+            hub.mu.Lock()
+            msgs := hub.messages[update.ChatID]
+            for i, m := range msgs {
+                if m.Timestamp == update.Timestamp {
+                    hub.messages[update.ChatID][i].Read = update.Read
+                    updatedMsg, err := json.Marshal(hub.messages[update.ChatID][i])
+                    if err != nil {
+                        log.Printf("Ошибка маршаллинга обновленного сообщения: %v", err)
+                        continue
+                    }
+                    for client := range hub.chats[update.ChatID] {
+                        if err := client.WriteMessage(websocket.TextMessage, updatedMsg); err != nil {
+                            log.Printf("Ошибка отправки обновленного статуса: %v", err)
+                            client.Close()
+                            delete(hub.chats[update.ChatID], client)
+                        }
+                    }
+                }
+            }
+            hub.mu.Unlock()
+            continue
+        }
 
-		// Если это обычное текстовое сообщение.
-		var msg Message
-		if err := json.Unmarshal(data, &msg); err != nil {
-			log.Printf("Ошибка разбора JSON от %s: %v", clientID, err)
-			continue
-		}
+        // Обработка текстового сообщения
+        var msg Message
+        if err := json.Unmarshal(data, &msg); err != nil {
+            log.Printf("Ошибка разбора JSON от %s: %v", clientID, err)
+            continue
+        }
 
-		// Дополняем сообщение: chat_id, sender (из сохранённого имени) и timestamp.
-		msg.ChatID = chatID
-		hub.mu.Lock()
-		senderName := hub.chats[chatID][ws]
-		hub.mu.Unlock()
-		msg.Sender = senderName
-		if msg.Timestamp == 0 {
-			msg.Timestamp = time.Now().UnixMilli()
-		}
+        // Проверяем, что chat_id указан в сообщении
+        if msg.ChatID == "" {
+            log.Printf("Ошибка: chat_id не указан в сообщении от %s", clientID)
+            continue
+        }
 
-		log.Printf("Получено от %s в чате %s: %s", clientID, chatID, msg.Text)
-		hub.broadcast <- msg
-	}
+        hub.mu.Lock()
+        senderName := hub.chats[chatID][ws]
+        hub.mu.Unlock()
+        msg.Sender = senderName
+        if msg.Timestamp == 0 {
+            msg.Timestamp = time.Now().UnixMilli()
+        }
+
+        log.Printf("Получено от %s в чате %s: %s", clientID, msg.ChatID, msg.Text)
+        hub.broadcast <- msg
+    }
 }
 
 // pingLoop отправляет пинг-сообщения для поддержания соединения.
@@ -278,11 +283,3 @@ func (hub *ChatHub) pingLoop(conn *websocket.Conn, clientID, chatID string) {
 		}
 	}
 }
-
-
-
-
-
-
-
-

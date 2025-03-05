@@ -3,13 +3,13 @@ package main
 import (
 	"log"
 	"net/http"
-	"os" // Добавляем для работы с переменными окружения
+	"os" // Для работы с переменными окружения
 
 	"go-robot/internal/chat"
 	"go-robot/internal/db"
 	"go-robot/internal/handlers"
 	"go-robot/internal/seed"
-	"github.com/joho/godotenv" // Добавляем для локальной разработки с .env
+	"github.com/joho/godotenv" // Для локальной разработки с .env
 )
 
 func main() {
@@ -27,6 +27,15 @@ func main() {
 		log.Fatalf("Ошибка подключения к базе данных: %v", err)
 	}
 	defer database.Close()
+
+	// Подсчитываем количество записей в таблице guests при запуске
+	var count int
+	countQuery := `SELECT COUNT(*) FROM guests`
+	if err := database.QueryRow(countQuery).Scan(&count); err != nil {
+		log.Printf("Ошибка при подсчёте данных при запуске: %v", err)
+	} else {
+		log.Printf("Количество сохранённых данных при запуске: %d", count)
+	}
 
 	// Заполняем таблицу продуктов начальными данными (если требуется)
 	seed.InsertSampleProducts(database)
@@ -70,7 +79,6 @@ func main() {
 		log.Fatalf("Ошибка запуска сервера: %v", err)
 	}
 }
-
 
 
 

@@ -22,4 +22,3 @@ COPY --from=builder /app/go-robot .
 EXPOSE 8080
 
 CMD ["./go-robot"]
-
